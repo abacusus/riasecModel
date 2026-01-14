@@ -13,7 +13,7 @@ import traceback
 
 # ---------------- ENV ----------------
 load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY","AIzaSyC3mGkWBFYb4UVVsPUSnAO7n3H1CnVJnys")
+API_KEY = os.getenv("GEMINI_API_KEY",)
 MONGO_URI = os.getenv("MONGO_URI","mongodb+srv://naman:naman@cluster0.wfqx2hc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
 if not API_KEY:
@@ -128,7 +128,7 @@ async def create_profile(profile: UserProfile):
         print("DEBUG: Received profile object:")
         print(profile)
 
-        # 2️⃣ Convert Pydantic → dict
+        # Pydantic → dict
         try:
             new_profile = profile.model_dump()
             print("DEBUG: model_dump success")

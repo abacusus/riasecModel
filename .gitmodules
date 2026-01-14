@@ -1,0 +1,3 @@
+[submodule "AstraGuide"]
+	path = AstraGuide
+	url = https://github.com/username/AstraGuide.git
