@@ -1,22 +1,46 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, Field
+from motor.motor_asyncio import AsyncIOMotorClient
 
 import os, json, time
 from dotenv import load_dotenv
-from google import genai
+import google.generativeai as genai
+import traceback
+
 
 # ---------------- ENV ----------------
 load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY","AIzaSyCB_SljG27O4qdKUS3nUxXJKr8StKCwE9M")
+API_KEY = os.getenv("GEMINI_API_KEY","AIzaSyC3mGkWBFYb4UVVsPUSnAO7n3H1CnVJnys")
+MONGO_URI = os.getenv("MONGO_URI","mongodb+srv://naman:naman@cluster0.wfqx2hc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY missing")
 
-client = genai.Client(api_key=API_KEY)
+if not MONGO_URI:
+    # Use a warning or raise error depending on preference, for now ensuring we don't crash if just testing local logic
+    print("WARNING: MONGO_URI missing from env")
+
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+# ---------------- MONGO ----------------
+mongo_client = AsyncIOMotorClient(MONGO_URI)
+db = mongo_client["riasec_db"]
+profiles_collection = db["profiles"]
 
 # ---------------- APP ----------------
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this to specific origins for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------- RIASEC ----------------
 RIASEC_ORDER = ["R","I","A","S","E","C","R","I","A","S","E","C"]
@@ -31,6 +55,13 @@ RIASEC_INTENTS = {
 }
 
 OPTION_SCORES = [3,2,1,0]
+
+class UserProfile(BaseModel):
+    name: str
+    age: int
+    currentStatus: str = Field(..., description="Class or Degree")
+    mobile: str
+    email: EmailStr
 
 # ---------------- STATE ----------------
 questions = []
@@ -65,10 +96,8 @@ Rules:
 - Each item must have ONLY: question, options
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
+    response = model.generate_content(prompt)
+
 
     raw = response.text.strip()
 
@@ -92,12 +121,50 @@ Rules:
     return final_questions
 
 
+@app.post("/profile")
+async def create_profile(profile: UserProfile):
+    try:
+        # 1️⃣ Confirm request parsing
+        print("DEBUG: Received profile object:")
+        print(profile)
+
+        # 2️⃣ Convert Pydantic → dict
+        try:
+            new_profile = profile.model_dump()
+            print("DEBUG: model_dump success")
+        except Exception as dump_err:
+            print("DEBUG: model_dump FAILED")
+            traceback.print_exc()
+            raise dump_err
+
+        print("DEBUG: Data to insert:", new_profile)
+
+        # 3️⃣ Mongo insert
+        try:
+            result = await profiles_collection.insert_one(new_profile)
+            print("DEBUG: Mongo insert success, ID:", result.inserted_id)
+        except Exception as db_err:
+            print("DEBUG: Mongo insert FAILED")
+            traceback.print_exc()
+            raise db_err
+
+        return {
+            "ok": True,
+            "id": str(result.inserted_id)
+        }
+
+    except Exception as e:
+        print("🔥 PROFILE CREATE ERROR 🔥")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Profile creation failed: {str(e)}"
+        )
+
 
 # ---------------- ROUTES ----------------
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+
 
 @app.get("/start")
 def start_test():
